@@ -1,44 +1,37 @@
 module Main where
 import Text.Parsec
 import Text.Parsec.String (Parser)
-import Data.List (intercalate)
-import Data.Char (isSpace)
 import System.Environment (getArgs)
 
--- option A: have tree as an array of tuples
--- option B: have tree as a proper data type
+data KT k v = Empt | Leaf String | Node Int Float (KT k v) (KT k v) deriving (Show)
 
-data KT k v = EmptyKT | Leaf String | NodeKT k v (KT k v) (KT k v) deriving (Show)
+fst' :: (a, b, c) -> a
+fst' (x, _, _) = x
 
-treeAddKT :: (Ord k) => (k, v) -> KT k v -> Either String (KT k v)
-treeAddKT (k, v) EmptyKT = Right (NodeKT k v EmptyKT EmptyKT)
-treeAddKT (k, v) (Leaf _) = Left "Cannot add to leaf"
-treeAddKT (k, v) (NodeKT k' v' l r)
-    | k == k' = Left "Key already exists"
-    | k < k' = case treeAddKT (k, v) l of
-        Left err -> Left err
-        Right l' -> Right (NodeKT k' v' l' r)
-    | k > k' = case treeAddKT (k, v) r of
-        Left err -> Left err
-        Right r' -> Right (NodeKT k' v' l r')
+snd' :: (a, b, c) -> b
+snd' (_, x, _) = x
 
-test :: IO ()
-test = do
-    let tree = treeAddLeafKT "a" $ treeAddKT (1, 5.5) EmptyKT
-    print tree
+trd :: (a, b, c) -> c
+trd (_, _, x) = x
 
-treeAddLeafKT :: (Ord k) => (k, String) -> KT k v -> Either String (KT k v)
-treeAddLeafKT (k, v) EmptyKT = Right (Leaf v)
-treeAddLeafKT (k, v) (Leaf _) = Left "Cannot add to leaf"
-treeAddLeafKT (k, v) (NodeKT k' v' l r)
-    | k == k' = Left "Key already exists"
-    | k < k' = case treeAddLeafKT (k, v) l of
-        Left err -> Left err
-        Right l' -> Right (NodeKT k' v' l' r)
-    | k > k' = case treeAddLeafKT (k, v) r of
-        Left err -> Left err
-        Right r' -> Right (NodeKT k' v' l r')
-    
+findLeaf :: KT k v -> [Float] -> String
+findLeaf (Leaf s) _ = s
+findLeaf Empt _ = ""
+findLeaf (Node {}) [] = ""
+findLeaf (Node _ v l r) (x:xs)
+    | x < v = findLeaf l xs
+    | x > v = findLeaf r xs
+    | otherwise = ""
+
+buildTree :: [(Int, (Int, Float, String))] -> Int -> KT Int Float
+buildTree [] _  = Leaf ""
+buildTree (x:xs) i
+    | fst x == i =
+        if fst' (snd x) == -1 then Leaf (trd (snd x))
+        else if fst (head xs) == i+2 then Node (fst' (snd x)) (snd' (snd x)) (buildTree xs (i+2)) (buildTree (tail xs) (i+2))
+        else Node (fst' (snd x)) (snd' (snd x)) (buildTree xs (i+2)) (buildTree xs (i+2))
+    | fst x > i = buildTree xs i
+    | otherwise = Leaf ""
 
 countSpaces :: Parser Int
 countSpaces = do
@@ -51,28 +44,49 @@ optionParser = do
     opt <- many1 digit
     if opt == "1" then do
         _ <- char ' '
-        file1 <- many1 (letter <|> char '.')
+        file1 <- many1 (letter <|> char '.' <|> digit)
         _ <- char ' '
-        file2 <- many1 (letter <|> char '.')
+        file2 <- many1 (letter <|> char '.' <|> digit)
         return (file1, file2)
     else fail "Invalid option"
 
+parseNode :: Parser (Int, Float, String)
+parseNode = do
+    _ <- string "Node: "
+    key <- many1 digit
+    _ <- string ", "
+    value <- many1 (digit <|> char '.')
+    return (read key, read value, "")
+
+parseLeaf :: Parser (Int, Float, String)
+parseLeaf = do
+    _ <- string "Leaf: "
+    val <- many1 (letter <|> digit)
+    return (-1, 0.0, val)
+
+contentParser :: Parser (Int, (Int, Float, String))
+contentParser = do
+    indent <- countSpaces
+    content <- parseNode <|> parseLeaf
+    return (indent, content)
+
+parseData :: Parser [Float]
+parseData = do
+    data' <- sepBy (many1 (digit <|> char '.')) (char ',')
+    return (map read data')
 
 main :: IO ()
 main = do
     args <- getArgs
-    let input = intercalate " " args
-    -- print input
+    let input = unwords args
     let parsedArgs = parse optionParser "" input
     case parsedArgs of
         Left err -> print err
         Right (file1, file2) -> do
             treeDef <- readFile file1
-            let treeLines = lines treeDef
             treeData <- readFile file2
-            let dataLines = lines treeData
-            -- mapM_ putStrLn treeLines
-            let ddd = [x | (Right x) <- map (parse countSpaces "") treeLines]
-            -- let ddd = zip [1..] treeLines
-            print ddd
-            print treeData
+            let tree = buildTree [x | (Right x) <- map (parse contentParser "") (lines treeDef)] 0
+            -- print t
+            let values = [x | (Right x) <- map (parse parseData "") (lines treeData)]
+            -- print b
+            mapM_ (putStrLn . findLeaf tree) values
